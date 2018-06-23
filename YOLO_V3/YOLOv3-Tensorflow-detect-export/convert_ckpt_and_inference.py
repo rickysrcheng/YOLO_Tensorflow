@@ -7,8 +7,8 @@ from matplotlib import pyplot as plt
 from PIL import Image, ImageDraw
 import time
 import uff
-import tensorrt as trt
-
+#import tensorrt as trt
+import tensorflow.contrib.tensorrt as trt
 from yolo_v3 import yolo_v3, load_weights, detections_boxes, non_max_suppression
 
 FLAGS = tf.app.flags.FLAGS
@@ -49,7 +49,7 @@ def convert_to_original_size(box, size, original_size):
     return list(box.reshape(-1))
 
 
-def main(argv=None):
+def yolo_tf(argv=None):
     
     BASE_PATH = 'images'
     TEST_IMAGES = os.listdir(BASE_PATH)
@@ -73,7 +73,7 @@ def main(argv=None):
         boxes = detections_boxes(detections)#shape=(?, 10647, 85), dtype=float32)
         #coordinates of top left and bottom right points+num_class_confidence
 
-        boxes = tf.identity(boxes, name='boxes')
+        #boxes = tf.identity(boxes, name='boxes')
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
         saver = tf.train.Saver()
         with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
@@ -83,59 +83,59 @@ def main(argv=None):
             writer.close()
             saver.save(sess,"models/yolov3.ckpt")
             
-            for img in TEST_IMAGES:
-                start = time.time()
-                image_path = os.path.join(BASE_PATH, img)
+            # for img in TEST_IMAGES:
+            #     start = time.time()
+            #     image_path = os.path.join(BASE_PATH, img)
 
-                image = Image.open(image_path)
-                w,h = image.size
-                img_resized = image.resize(size=(FLAGS.size, FLAGS.size))
+            #     image = Image.open(image_path)
+            #     w,h = image.size
+            #     img_resized = image.resize(size=(FLAGS.size, FLAGS.size))
               
-                detected_boxes = sess.run(boxes, feed_dict={inputs: [np.array(img_resized, dtype=np.float32)]})
+            #     detected_boxes = sess.run(boxes, feed_dict={inputs: [np.array(img_resized, dtype=np.float32)]})
 
-                filtered_boxes = non_max_suppression(detected_boxes, confidence_threshold=FLAGS.conf_threshold,
-                                             iou_threshold=FLAGS.iou_threshold)
+            #     filtered_boxes = non_max_suppression(detected_boxes, confidence_threshold=FLAGS.conf_threshold,
+            #                                  iou_threshold=FLAGS.iou_threshold)
 
-                draw_boxes(filtered_boxes, image, classes, (FLAGS.size, FLAGS.size))
+            #     draw_boxes(filtered_boxes, image, classes, (FLAGS.size, FLAGS.size))
                 
-                #plt.imshow(image)
-                #plt.show()
+            #     #plt.imshow(image)
+            #     #plt.show()
 
-                image.save(FLAGS.output_img)
-                print time.time()-start
+            #     image.save(FLAGS.output_img)
+            #     print time.time()-start
             #print boxes.name, detections.name
-            OUTPUT_NAMES = ['boxes']
+            OUTPUT_NAMES = ['output']
             graphdef = tf.get_default_graph().as_graph_def()
             frozen_graph = tf.graph_util.convert_variables_to_constants(sess,
-                                                                            graphdef,
-                                                                            OUTPUT_NAMES)
+                                                                        graphdef,
+                                                                        OUTPUT_NAMES)
             return tf.graph_util.remove_training_nodes(frozen_graph)
-            print OUTPUT_NAMES
 
 if __name__ == '__main__':
 
     # refer to this
     # https://docs.nvidia.com/deeplearning/sdk/tensorrt-api/topics/topics/workflows/tf_to_tensorrt.html#Convert-a-Tensorflow-Model-to-UFF
 
-    tf_model = tf.app.run()
-    uff_model = uff.from_tensorflow(tf_model, ["boxes"])
-    G_LOGGER = trt.infer.ConsoleLogger(trt.infer.LogSeverity.ERROR)
+    tf_model = yolo_tf()#tf.app.run()
 
-    parser = uffparser.create_uff_parser()
-    parser.register_input("Placeholder", (1,28,28))
-    parser.register_output("boxes")
-    engine = trt.utils.uff_to_trt_engine(G_LOGGER, uff_model, parser, 1, 1 << 20)
+    # uff_model = uff.from_tensorflow(tf_model, ['output'])
+    # G_LOGGER = trt.infer.ConsoleLogger(trt.infer.LogSeverity.ERROR)
 
-    host_mem = parser.hidden_plugin_memory()
+    # parser = uffparser.create_uff_parser()
+    # parser.register_input("Placeholder", (1,28,28))
+    # parser.register_output("boxes")
+    # engine = trt.utils.uff_to_trt_engine(G_LOGGER, uff_model, parser, 1, 1 << 20)
 
-
-    parser.destroy()
+    # host_mem = parser.hidden_plugin_memory()
 
 
-    # trt_graph = trt.create_inference_graph(
-    # input_graph_def = tf_model,
-    # outputs = ['boxes'],
-    # max_batch_size=16,
-    # max_workspace_size_bytes=3000000000,
-    # precision_mode=FP16,
-    # minimum_segment_size=3)
+    # parser.destroy()
+
+
+    trt_graph = trt.create_inference_graph(
+    input_graph_def = tf_model,
+    outputs = ['output'],
+    max_batch_size=16,
+    max_workspace_size_bytes=3000000000,
+    precision_mode='INT8',
+    minimum_segment_size=3)
